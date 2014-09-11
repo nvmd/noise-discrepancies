@@ -149,8 +149,7 @@ void do_slic(const cv::Mat& bgr_input_image,
 
 int main(int argc, char** argv)
 {
-    const std::string input_filename("input0.png");
-    const std::string output_filename("output.jpg");
+    const std::string input_filename(argv[1]);
     const std::string segmented_contour_image_filename("contours.jpg");
     const int    slic_superpixel_count = 200;    //Desired number of superpixels.
     const double slic_compactness = 20;     //Compactness factor
