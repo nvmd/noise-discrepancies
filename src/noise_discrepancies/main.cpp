@@ -45,14 +45,15 @@ void generate_cluster_masks(cv::Mat &image, const cv::Mat &labels,
 
 void draw_contour_for_masked_segment(cv::Mat &segment_mask,
                                      cv::Mat &segmented_contour_image,
-                                     const cv::Scalar& color)
+                                     const cv::Scalar& color,
+                                     const int thickness = 2)
 {
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(segment_mask, contours,
                      CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);
 
     for(int i = 0; i < contours.size(); ++i) {
-        cv::drawContours(segmented_contour_image, contours, i, color, 2);
+        cv::drawContours(segmented_contour_image, contours, i, color, thickness);
     }
 }
 
@@ -155,6 +156,9 @@ int main(int argc, char** argv)
     const double slic_compactness = 20;     //Compactness factor
                                             // use a value ranging from 10 to 40
                                             // depending on your needs. Default is 10
+    const int median_filter_kernel_size = 3;
+    const cv::Size gaussian_filter_kernel_size(3, 3);
+    double gaussian_filter_kernel_sigma_x = 0;
 
     cv::Mat input_image = cv::imread(input_filename);
     if (input_image.data == nullptr) {
@@ -186,6 +190,86 @@ int main(int argc, char** argv)
     }
     write_bgr_image(segmented_contour_image,
                     segmented_contour_image_filename);
+
+    // Estimated noise for the input image
+    std::vector<cv::Mat> noise_estimation;
+    cv::Mat median_filtered;
+    cv::medianBlur(input_image, median_filtered, median_filter_kernel_size);
+    noise_estimation.push_back(input_image - median_filtered);
+    write_bgr_image(median_filtered, "median_noise_filtered.jpg");
+    write_bgr_image(noise_estimation.back(), "median_noise_est.jpg");
+    cv::Mat gaussian_filtered;
+    cv::GaussianBlur(input_image, gaussian_filtered,
+                     gaussian_filter_kernel_size, gaussian_filter_kernel_sigma_x);
+    noise_estimation.push_back(input_image - gaussian_filtered);
+    write_bgr_image(gaussian_filtered, "gaussian_noise_filtered.jpg");
+    write_bgr_image(noise_estimation.back(), "gaussian_noise_est.jpg");
+
+
+
+    cv::Mat3d segment_features(cluster_masks.size(),
+                               2 * noise_estimation.size());
+    for (size_t i = 0; i < cluster_masks.size(); ++i) {
+        for (size_t j = 0; j < noise_estimation.size(); ++j) {
+            cv::Scalar mean;
+            cv::Scalar stddev;
+            cv::meanStdDev(noise_estimation[j],
+                           mean, stddev,
+                           cluster_masks[i]);
+
+            // F^cd_s:
+            // {(mean_d1c1, mean_d1c2, mean_d1c3),
+            //  (stddev_d1c1, stddev_d1c2, stddev_d1c3)}
+
+            cv::Vec3d& filter_mean   = segment_features.at<cv::Vec3d>(i, j * 2);
+            cv::Vec3d& filter_stddev = segment_features.at<cv::Vec3d>(i, j * 2 + 1);
+            filter_mean[0]   = mean.val[0];
+            filter_mean[1]   = mean.val[1];
+            filter_mean[2]   = mean.val[2];
+            filter_stddev[0] = stddev.val[0];
+            filter_stddev[1] = stddev.val[1];
+            filter_stddev[2] = stddev.val[2];
+        }
+    }
+
+    cv::Mat1d segment_feature_norms(segment_features.rows, 1);
+    for (size_t i = 0; i < segment_features.rows; ++i) {
+        double norm = cv::norm(segment_features.row(i), cv::NORM_L2);
+        segment_feature_norms.at<double>(i, 0) = norm;
+    }
+
+    cv::Scalar norm_mean_scalar = cv::mean(segment_feature_norms);
+    double norm_mean = norm_mean_scalar.val[0];
+    double norm_max;
+    cv::minMaxIdx(segment_feature_norms, nullptr, &norm_max,
+                                         nullptr, nullptr);
+
+    std::cout << "Features: segments_count=" << segment_features.rows
+              << ", components=" << segment_features.cols * segment_features.channels()
+              << ", filter_components=" << segment_features.cols
+              << ", avg_norm=" << norm_mean
+              << ", max_norm=" << norm_max
+              << std::endl;
+
+    cv::Mat1d segment_feature_deviations(segment_feature_norms.rows, 1);
+    for (size_t i = 0; i < segment_feature_norms.rows; ++i) {
+        double norm = segment_feature_norms.at<double>(i, 0);
+        segment_feature_deviations.at<double>(i, 0) = std::abs(norm_mean - norm);
+    }
+
+    cv::normalize(segment_feature_deviations, segment_feature_deviations,
+                  0, 255, cv::NORM_MINMAX);
+
+    cv::Mat noise_discrepancies;
+    input_image.copyTo(noise_discrepancies);
+    for (size_t i = 0; i < cluster_masks.size(); ++i) {
+        cv::Scalar color = cv::Scalar(segment_feature_deviations.at<double>(i, 0),
+                                      0, 0);
+        draw_contour_for_masked_segment(cluster_masks[i],
+                                        noise_discrepancies,
+                                        color, CV_FILLED);
+    }
+    write_bgr_image(noise_discrepancies, "noise_discrepancies_map.jpg");
 
 	return 0;
 }
