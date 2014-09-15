@@ -251,10 +251,7 @@ int main(int argc, char** argv)
               << std::endl;
 
     cv::Mat1d segment_feature_deviations(segment_feature_norms.rows, 1);
-    for (size_t i = 0; i < segment_feature_norms.rows; ++i) {
-        double norm = segment_feature_norms.at<double>(i, 0);
-        segment_feature_deviations.at<double>(i, 0) = std::abs(norm_mean - norm);
-    }
+    cv::absdiff(segment_feature_norms, norm_mean, segment_feature_deviations);
 
     cv::normalize(segment_feature_deviations, segment_feature_deviations,
                   0, 255, cv::NORM_MINMAX);
