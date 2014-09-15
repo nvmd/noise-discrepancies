@@ -158,6 +158,7 @@ int main(int argc, char** argv)
     const int median_filter_kernel_size = 3;
     const cv::Size gaussian_filter_kernel_size(3, 3);
     double gaussian_filter_kernel_sigma_x = 0;
+    const cv::Size average_filter_kernel_size(3, 3);
 
     cv::Mat input_image = cv::imread(input_filename);
     if (input_image.data == nullptr) {
@@ -192,11 +193,15 @@ int main(int argc, char** argv)
 
     // Estimated noise for the input image
     std::vector<cv::Mat> noise_estimation;
+
+    // "salt and pepper" noise
     cv::Mat median_filtered;
     cv::medianBlur(input_image, median_filtered, median_filter_kernel_size);
     noise_estimation.push_back(input_image - median_filtered);
     write_bgr_image(median_filtered, "median_noise_filtered.jpg");
     write_bgr_image(noise_estimation.back(), "median_noise_est.jpg");
+
+    // high-frequency noise
     cv::Mat gaussian_filtered;
     cv::GaussianBlur(input_image, gaussian_filtered,
                      gaussian_filter_kernel_size, gaussian_filter_kernel_sigma_x);
@@ -204,7 +209,11 @@ int main(int argc, char** argv)
     write_bgr_image(gaussian_filtered, "gaussian_noise_filtered.jpg");
     write_bgr_image(noise_estimation.back(), "gaussian_noise_est.jpg");
 
-
+    cv::Mat average_filtered;
+    cv::blur(input_image, average_filtered, average_filter_kernel_size);
+    noise_estimation.push_back(input_image - average_filtered);
+    write_bgr_image(average_filtered, "average_noise_filtered.jpg");
+    write_bgr_image(noise_estimation.back(), "average_noise_est.jpg");
 
     cv::Mat3d segment_features(cluster_masks.size(),
                                2 * noise_estimation.size());
