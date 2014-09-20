@@ -1,71 +1,63 @@
 #include <string>
 #include <iostream>
 #include <cmath>
+#include <cassert>
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
-#include <boost/lexical_cast.hpp>
+#include "utils.hpp"
 
-#include "SLIC.h"
+#include "slic/SLIC.h"
 
-bool write_bgr_image(const cv::Mat& output_image,
-                     const std::string& output_filename)
+struct noise_estimation_env_t {
+    int      median_filter_kernel_size      = 3;
+    cv::Size gaussian_filter_kernel_size    = cv::Size(3, 3);
+    double   gaussian_filter_kernel_sigma_x = 0;
+    cv::Size average_filter_kernel_size     = cv::Size(3, 3);
+};
+
+struct slic_segmentation_env_t {
+    int    superpixel_count = 200;  //Desired number of superpixels.
+    double compactness      = 20;   //Compactness factor
+                                    // use a value ranging from 10 to 40
+                                    // depending on your needs. Default is 10
+};
+
+void estimate_noise(const cv::Mat& input_image, std::vector<cv::Mat>& estimations,
+        const noise_estimation_env_t& env)
 {
-    std::cout << "Output Image: name=" << output_filename
-            << ", width=" << output_image.cols << ", height=" << output_image.rows
-            << ", channels=" << output_image.channels() << ", total=" << output_image.total()
-            << std::endl;
-    return cv::imwrite(output_filename, output_image);
+    // "salt and pepper" noise
+    cv::Mat median_filtered;
+    cv::medianBlur(input_image, median_filtered, env.median_filter_kernel_size);
+    estimations.push_back(input_image - median_filtered);
+    write_bgr_image(median_filtered, "median_noise_filtered.jpg");
+    write_bgr_image(estimations.back(), "median_noise_est.jpg");
+
+    // high-frequency noise
+    cv::Mat gaussian_filtered;
+    cv::GaussianBlur(input_image, gaussian_filtered,
+            env.gaussian_filter_kernel_size, env.gaussian_filter_kernel_sigma_x);
+    estimations.push_back(input_image - gaussian_filtered);
+    write_bgr_image(gaussian_filtered, "gaussian_noise_filtered.jpg");
+    write_bgr_image(estimations.back(), "gaussian_noise_est.jpg");
+
+    cv::Mat average_filtered;
+    cv::blur(input_image, average_filtered, env.average_filter_kernel_size);
+    estimations.push_back(input_image - average_filtered);
+    write_bgr_image(average_filtered, "average_noise_filtered.jpg");
+    write_bgr_image(estimations.back(), "average_noise_est.jpg");
 }
 
-bool write_argb_image(const cv::Mat& argb_image,
-                      const std::string& output_filename)
-{
-    cv::Mat output_image(argb_image.size(), CV_8UC3);
-    int argb_to_bgr[] = { 3,0, // blue
-                          2,1, // green
-                          1,2 // red
-                        };
-    cv::mixChannels(&argb_image, 1, &output_image, 1, argb_to_bgr, 3);
-    return write_bgr_image(output_image, output_filename);
-}
-
-void generate_cluster_masks(cv::Mat &image, const cv::Mat &labels,
-                            std::vector<cv::Mat> &cluster_masks)
-{
-    for(int y = 0; y < image.rows; ++y) {
-        for(int x = 0; x < image.cols; ++x) {
-            int cluster_label = labels.at<int>(y, x);
-            cluster_masks[cluster_label].at<uchar>(y, x) = 255;
-        }
-    }
-}
-
-void draw_contour_for_masked_segment(cv::Mat &segment_mask,
-                                     cv::Mat &segmented_contour_image,
-                                     const cv::Scalar& color,
-                                     const int thickness = 2)
-{
-    std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(segment_mask, contours,
-                     CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);
-
-    for(int i = 0; i < contours.size(); ++i) {
-        cv::drawContours(segmented_contour_image, contours, i, color, thickness);
-    }
-}
-
-void do_slic(const cv::Mat& bgr_input_image,
-             const int superpixel_count, const double compactness,
+void do_slic(const cv::Mat& bgr_input_image, const slic_segmentation_env_t& env,
              std::vector<cv::Mat>& cluster_masks)
 {
     //----------------------------------
     // Initialize parameters
     //----------------------------------
 
-    assert(superpixel_count < bgr_input_image.cols * bgr_input_image.rows);
+    assert(env.superpixel_count < bgr_input_image.cols * bgr_input_image.rows);
 
     // unsigned int (32 bits) to hold a pixel in ARGB format as follows:
     // from left to right,
@@ -99,7 +91,7 @@ void do_slic(const cv::Mat& bgr_input_image,
     segment.PerformSLICO_ForGivenK((unsigned int*) argb_image.ptr(),
                                    argb_image.cols, argb_image.rows,
                                    cluster_labels, cluster_count,
-                                   superpixel_count, compactness);
+                                   env.superpixel_count, env.compactness);
     //for a given grid step size / desired superpixel size
     //segment.PerformSLICO_ForGivenStepSize(img, argb_image.cols, argb_image.rows,
     // cluster_labels, cluster_count, stepsize, compactness);
@@ -151,14 +143,8 @@ int main(int argc, char** argv)
 {
     const std::string input_filename(argv[1]);
     const std::string segmented_contour_image_filename("contours.jpg");
-    const int    slic_superpixel_count = 200;    //Desired number of superpixels.
-    const double slic_compactness = 20;     //Compactness factor
-                                            // use a value ranging from 10 to 40
-                                            // depending on your needs. Default is 10
-    const int median_filter_kernel_size = 3;
-    const cv::Size gaussian_filter_kernel_size(3, 3);
-    double gaussian_filter_kernel_sigma_x = 0;
-    const cv::Size average_filter_kernel_size(3, 3);
+    slic_segmentation_env_t slic_segmentation_env;
+    noise_estimation_env_t  noise_estimation_env;
 
     cv::Mat input_image = cv::imread(input_filename);
     if (input_image.data == nullptr) {
@@ -173,7 +159,7 @@ int main(int argc, char** argv)
 
 	// Do SLIC (superpixel) segmentation
     std::vector<cv::Mat> cluster_masks;
-    do_slic(input_image, slic_superpixel_count, slic_compactness, cluster_masks);
+    do_slic(input_image, slic_segmentation_env, cluster_masks);
 
     // Draw contour for each segment and save the image with segment boundaries.
     cv::Mat segmented_contour_image;
@@ -188,36 +174,17 @@ int main(int argc, char** argv)
                                         segmented_contour_image,
                                         color);
     }
-    write_bgr_image(segmented_contour_image,
-                    segmented_contour_image_filename);
+    write_bgr_image(segmented_contour_image, segmented_contour_image_filename);
 
     // Estimated noise for the input image
     std::vector<cv::Mat> noise_estimation;
+    estimate_noise(input_image, noise_estimation, noise_estimation_env);
 
-    // "salt and pepper" noise
-    cv::Mat median_filtered;
-    cv::medianBlur(input_image, median_filtered, median_filter_kernel_size);
-    noise_estimation.push_back(input_image - median_filtered);
-    write_bgr_image(median_filtered, "median_noise_filtered.jpg");
-    write_bgr_image(noise_estimation.back(), "median_noise_est.jpg");
-
-    // high-frequency noise
-    cv::Mat gaussian_filtered;
-    cv::GaussianBlur(input_image, gaussian_filtered,
-                     gaussian_filter_kernel_size, gaussian_filter_kernel_sigma_x);
-    noise_estimation.push_back(input_image - gaussian_filtered);
-    write_bgr_image(gaussian_filtered, "gaussian_noise_filtered.jpg");
-    write_bgr_image(noise_estimation.back(), "gaussian_noise_est.jpg");
-
-    cv::Mat average_filtered;
-    cv::blur(input_image, average_filtered, average_filter_kernel_size);
-    noise_estimation.push_back(input_image - average_filtered);
-    write_bgr_image(average_filtered, "average_noise_filtered.jpg");
-    write_bgr_image(noise_estimation.back(), "average_noise_est.jpg");
-
+    // Segment feature vectors
     cv::Mat3d segment_features(cluster_masks.size(),
                                2 * noise_estimation.size());
     for (size_t i = 0; i < cluster_masks.size(); ++i) {
+        // Generate feature vector for segment
         for (size_t j = 0; j < noise_estimation.size(); ++j) {
             cv::Scalar mean;
             cv::Scalar stddev;
