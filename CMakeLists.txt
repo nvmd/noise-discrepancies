@@ -12,4 +12,5 @@ else()
 endif()
 
 add_subdirectory(src/slic)
+add_subdirectory(src/slic_segmentation)
 add_subdirectory(src/noise_discrepancies)

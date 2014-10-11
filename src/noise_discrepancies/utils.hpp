@@ -1,3 +1,6 @@
+#ifndef _NOISE_DISCREPANCIES_UTILS_HPP_
+#define _NOISE_DISCREPANCIES_UTILS_HPP_
+
 #include <vector>
 #include <string>
 
@@ -13,3 +16,5 @@ void draw_contour_for_masked_segment(cv::Mat &segment_mask,
                                      cv::Mat &segmented_contour_image,
                                      const cv::Scalar& color,
                                      const int thickness = 2);
+
+#endif  // _NOISE_DISCREPANCIES_UTILS_HPP_
