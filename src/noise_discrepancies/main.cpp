@@ -9,6 +9,7 @@
 
 #include "utils.hpp"
 #include "slic_segmentation/slic_segmentation.hpp"
+#include "rigid_segmentation/regular_segmentation.hpp"
 
 struct noise_estimation_env_t {
     int      median_filter_kernel_size      = 3;
@@ -60,11 +61,13 @@ int main(int argc, char** argv)
                   << ", channels=" << input_image.channels() << ", total=" << input_image.total()
                   << std::endl;
 
-	// Do SLIC (superpixel) segmentation
+    // Do SLIC (superpixel) segmentation
+    std::cout << "Doing SLIC segmentation..." << std::endl;
     std::vector<cv::Mat> cluster_masks;
     do_slic(input_image, slic_segmentation_env, cluster_masks);
 
     // Draw contour for each segment and save the image with segment boundaries.
+    std::cout << "Drawing segment contours..." << std::endl;
     cv::Mat segmented_contour_image;
     input_image.copyTo(segmented_contour_image);
     cv::RNG rng(890);
@@ -80,10 +83,12 @@ int main(int argc, char** argv)
     write_bgr_image(segmented_contour_image, segmented_contour_image_filename);
 
     // Estimated noise for the input image
+    std::cout << "Estimating noise..." << std::endl;
     std::vector<cv::Mat> noise_estimation;
     estimate_noise(input_image, noise_estimation, noise_estimation_env);
 
     // Segment feature vectors
+    std::cout << "Generating segment feature vectors..." << std::endl;
     cv::Mat3d segment_features(cluster_masks.size(),
                                2 * noise_estimation.size());
     for (size_t i = 0; i < cluster_masks.size(); ++i) {
@@ -110,6 +115,7 @@ int main(int argc, char** argv)
         }
     }
 
+    std::cout << "Computing norms of the segment feature vectors..." << std::endl;
     cv::Mat1d segment_feature_norms(segment_features.rows, 1);
     for (size_t i = 0; i < segment_features.rows; ++i) {
         double norm = cv::norm(segment_features.row(i), cv::NORM_L2);
